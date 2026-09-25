@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>图片压缩工具</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="app-header">
+  <h1>图片压缩工具</h1>
+  <p class="subtitle">本地处理 · 不上传 · 支持 JPEG / PNG / WebP</p>
+</header>
+
+<main class="container">
+  <section id="dropzone" class="dropzone" tabindex="0">
+    <div class="dropzone-inner">
+      <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M12 16V4m0 0l-4 4m4-4l4 4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3" stroke-linecap="round"/>
+      </svg>
+      <p class="dropzone-title">拖拽图片到此处，或点击选择文件</p>
+      <p class="dropzone-hint">支持批量处理（10 张以上）、单张最大 50MB+</p>
+      <input type="file" id="fileInput" accept="image/*" multiple hidden>
+    </div>
+  </section>
+
+  <section class="settings panel">
+    <h2>压缩设置</h2>
+    <div class="settings-grid">
+      <label class="field">
+        <span>输出格式</span>
+        <select id="optFormat">
+          <option value="original" selected>保持原格式</option>
+          <option value="image/jpeg">JPEG</option>
+          <option value="image/png">PNG</option>
+          <option value="image/webp">WebP</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>压缩质量 <output id="qualityValue">80%</output></span>
+        <input type="range" id="optQuality" min="10" max="100" value="80" step="5">
+      </label>
+      <label class="field">
+        <span>尺寸缩放</span>
+        <select id="optScale">
+          <option value="1" selected>原始尺寸 (100%)</option>
+          <option value="0.75">75%</option>
+          <option value="0.5">50%</option>
+          <option value="0.25">25%</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>最长边限制（px，0 为不限）</span>
+        <input type="number" id="optMaxDim" min="0" max="20000" value="0" step="100">
+      </label>
+    </div>
+    <p class="settings-note">修改设置后，点击「重新处理」应用到当前列表。</p>
+  </section>
+
+  <section class="panel" id="listPanel" hidden>
+    <div class="panel-head">
+      <h2>处理列表 <span id="statsSummary" class="stats-summary"></span></h2>
+      <div class="actions">
+        <button id="btnReprocess" class="btn">重新处理</button>
+        <button id="btnDownloadAll" class="btn primary" disabled>打包下载 (ZIP)</button>
+        <button id="btnClear" class="btn danger">清空列表</button>
+      </div>
+    </div>
+    <div class="progress-bar"><div id="overallProgress" class="progress-fill" style="width:0%"></div></div>
+    <ul id="fileList" class="file-list"></ul>
+  </section>
+
+  <section class="panel" id="historyPanel">
+    <div class="panel-head">
+      <h2>处理历史</h2>
+      <button id="btnClearHistory" class="btn danger">清空历史</button>
+    </div>
+    <ul id="historyList" class="history-list"></ul>
+    <p id="historyEmpty" class="empty-tip">暂无历史记录</p>
+  </section>
+</main>
+
+<template id="tplFileItem">
+  <li class="file-item">
+    <div class="thumb"><img alt=""><span class="thumb-placeholder">…</span></div>
+    <div class="info">
+      <div class="name-row"><span class="name"></span><span class="badge"></span></div>
+      <div class="meta"></div>
+      <div class="status-line"></div>
+    </div>
+    <div class="item-actions">
+      <button class="btn small btn-download" disabled>下载</button>
+    </div>
+  </li>
+</template>
+
+<script src="js/db.js"></script>
+<script src="js/zip.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

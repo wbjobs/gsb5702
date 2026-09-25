@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>E2E 测试</title></head>
+<body>
+<h1>图片压缩工具 E2E 测试</h1>
+<pre id="log">running...</pre>
+<iframe id="appFrame" src="../index.html" style="width:800px;height:400px"></iframe>
+<script src="../js/zip.js"></script>
+<script>
+'use strict';
+
+const logEl = document.getElementById('log');
+const lines = [];
+function report(name, pass, detail) {
+  const line = `${pass ? 'PASS' : 'FAIL'} ${name}${detail ? ' — ' + detail : ''}`;
+  lines.push(line);
+  logEl.textContent = lines.join('\n');
+  return fetch('/report', { method: 'POST', body: JSON.stringify({ name, pass, detail: String(detail || '') }) }).catch(() => {});
+}
+
+// ---------- 测试素材生成 ----------
+function gradientCanvas(w, h) {
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, w, h);
+  grad.addColorStop(0, '#3a7bd5');
+  grad.addColorStop(0.5, '#00d2ff');
+  grad.addColorStop(1, '#928dab');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  for (let i = 0; i < 30; i++) {
+    ctx.beginPath();
+    ctx.arc((i * 97) % w, (i * 61) % h, 20 + (i % 5) * 10, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  return canvas;
+}
+
+function canvasToFile(canvas, type, quality, name) {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(new File([blob], name, { type: blob.type })), type, quality);
+  });
+}
+
+// 向 JPEG 注入 EXIF 方向标记（APP1 段）
+async function injectExifOrientation(file, orientation) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const tiff = [
+    0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00, // II, 42, IFD 偏移 8
+    0x01, 0x00,                                     // 1 个条目
+    0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, // tag 0x0112, SHORT, count 1
+    orientation, 0x00, 0x00, 0x00,                  // 方向值
+    0x00, 0x00, 0x00, 0x00,                         // 下一个 IFD = 无
+  ];
+  const exifHeader = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00]; // "Exif\0\0"
+  const segLen = 2 + exifHeader.length + tiff.length;
+  const app1 = [0xff, 0xe1, (segLen >> 8) & 0xff, segLen & 0xff, ...exifHeader, ...tiff];
+  const out = new Uint8Array(buf.length + app1.length);
+  out.set(buf.slice(0, 2), 0);
+  out.set(app1, 2);
+  out.set(buf.slice(2), 2 + app1.length);
+  return new File([out], file.name, { type: 'image/jpeg' });
+}
+
+function runWorker(file, options) {
+  return new Promise((resolve) => {
+    const worker = new Worker('../js/worker.js');
+    const timer = setTimeout(() => { worker.terminate(); resolve({ ok: false, error: '超时' }); }, 60000);
+    worker.onmessage = (e) => { clearTimeout(timer); worker.terminate(); resolve(e.data); };
+    worker.onerror = (e) => { clearTimeout(timer); worker.terminate(); resolve({ ok: false, error: e.message }); };
+    worker.postMessage({ id: 1, file, options });
+  });
+}
+
+const DEFAULT_OPTS = { format: 'original', quality: 0.8, scale: 1, maxDim: 0 };
+
+async function decodePixel(blob, x, y) {
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.width; canvas.height = bitmap.height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  return { data: ctx.getImageData(x, y, 1, 1).data, width: canvas.width, height: canvas.height };
+}
+
+// ---------- 测试用例 ----------
+async function testJpegCompress() {
+  const file = await canvasToFile(gradientCanvas(1600, 1200), 'image/jpeg', 0.95, 'photo.jpg');
+  const res = await runWorker(file, { ...DEFAULT_OPTS, quality: 0.7 });
+  if (!res.ok) return report('JPEG 压缩', false, res.error);
+  const pass = res.type === 'image/jpeg' && res.buffer.byteLength < file.size && res.width === 1600;
+  report('JPEG 压缩', pass, `${file.size} → ${res.buffer.byteLength} 字节`);
+}
+
+async function testAlphaPng() {
+  const canvas = gradientCanvas(300, 200);
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, 100, 200); // 左 1/3 完全透明
+  const file = await canvasToFile(canvas, 'image/png', undefined, 'alpha.png');
+  const res = await runWorker(file, { ...DEFAULT_OPTS, format: 'image/png' });
+  if (!res.ok) return report('PNG 透明通道保留', false, res.error);
+  const blob = new Blob([res.buffer], { type: res.type });
+  const px = await decodePixel(blob, 10, 100);
+  report('PNG 透明通道保留', px.data[3] === 0, `左上角 alpha=${px.data[3]}`);
+}
+
+async function testAlphaWebp() {
+  const canvas = gradientCanvas(300, 200);
+  canvas.getContext('2d').clearRect(0, 0, 100, 200);
+  const file = await canvasToFile(canvas, 'image/png', undefined, 'alpha2.png');
+  const res = await runWorker(file, { ...DEFAULT_OPTS, format: 'image/webp', quality: 0.9 });
+  if (!res.ok) return report('WebP 透明通道保留', false, res.error);
+  if (res.type !== 'image/webp') return report('WebP 透明通道保留', false, '输出类型=' + res.type);
+  const px = await decodePixel(new Blob([res.buffer], { type: res.type }), 10, 100);
+  report('WebP 透明通道保留', px.data[3] < 10, `左上角 alpha=${px.data[3]}`);
+}
+
+async function testJpegFlatten() {
+  const canvas = gradientCanvas(200, 200);
+  canvas.getContext('2d').clearRect(0, 0, 100, 200);
+  const file = await canvasToFile(canvas, 'image/png', undefined, 'flatten.png');
+  const res = await runWorker(file, { ...DEFAULT_OPTS, format: 'image/jpeg', quality: 0.9 });
+  if (!res.ok) return report('JPEG 透明区域铺白底', false, res.error);
+  const px = await decodePixel(new Blob([res.buffer], { type: res.type }), 10, 100);
+  const pass = px.data[3] === 255 && px.data[0] > 200 && px.data[1] > 200 && px.data[2] > 200;
+  report('JPEG 透明区域铺白底', pass, `rgba=(${px.data[0]},${px.data[1]},${px.data[2]},${px.data[3]})`);
+}
+
+async function testExifOrientation() {
+  // 存储尺寸 400×200（横向），EXIF 方向 6 → 显示应为 200×400（纵向）
+  const jpeg = await canvasToFile(gradientCanvas(400, 200), 'image/jpeg', 0.9, 'exif.jpg');
+  const file = await injectExifOrientation(jpeg, 6);
+  const res = await runWorker(file, DEFAULT_OPTS);
+  if (!res.ok) return report('EXIF 方向自动纠正', false, res.error);
+  const pass = res.width === 200 && res.height === 400;
+  report('EXIF 方向自动纠正', pass, `输出尺寸 ${res.width}×${res.height}（期望 200×400）`);
+}
+
+async function testBigFile() {
+  const png = await canvasToFile(gradientCanvas(2400, 1800), 'image/png', undefined, 'big.png');
+  const target = 50 * 1024 * 1024;
+  const padding = new Uint8Array(Math.max(0, target - png.size)); // PNG 允许尾部填充
+  const file = new File([png, padding], 'big-50mb.png', { type: 'image/png' });
+  const res = await runWorker(file, { ...DEFAULT_OPTS, quality: 0.7, scale: 0.25 });
+  if (!res.ok) return report('50MB 大文件不崩', false, res.error);
+  const pass = res.width === 600 && res.height === 450;
+  report('50MB 大文件不崩', pass, `输入 ${(file.size / 1048576).toFixed(1)}MB → 输出 ${res.width}×${res.height}`);
+}
+
+async function testNonImage() {
+  const file = new File([new TextEncoder().encode('这不是图片')], 'readme.txt', { type: 'text/plain' });
+  const res = await runWorker(file, DEFAULT_OPTS);
+  report('非图片文件优雅失败', res.ok === false, res.ok ? '未报错（异常）' : '正确返回错误: ' + res.error);
+}
+
+async function testBatch() {
+  const files = [];
+  for (let i = 0; i < 12; i++) {
+    files.push(await canvasToFile(gradientCanvas(1280, 960), 'image/jpeg', 0.92, `batch-${i}.jpg`));
+  }
+  const POOL = 4;
+  const queue = files.slice();
+  const start = performance.now();
+  let done = 0, failed = 0;
+  await Promise.all(Array.from({ length: POOL }, async () => {
+    while (queue.length) {
+      const file = queue.shift();
+      const res = await runWorker(file, { ...DEFAULT_OPTS, quality: 0.75 });
+      res.ok ? done++ : failed++;
+    }
+  }));
+  const elapsed = (performance.now() - start) / 1000;
+  report('批量 12 张 < 10 秒', failed === 0 && elapsed < 10, `耗时 ${elapsed.toFixed(2)}s，成功 ${done}，失败 ${failed}`);
+}
+
+async function testPickResult() {
+  const frame = document.getElementById('appFrame');
+  await new Promise((r) => { if (frame.contentWindow.ImageCompressorTest) return r(); frame.onload = r; });
+  const T = frame.contentWindow.ImageCompressorTest;
+  const file = { size: 1000, type: 'image/jpeg' };
+  const r1 = T.pickResult(file, { size: 1200 }, 'image/jpeg');
+  const r2 = T.pickResult(file, { size: 1200 }, 'image/png');
+  const r3 = T.pickResult(file, { size: 800 }, 'image/jpeg');
+  const pass = r1.keptOriginal === true && r1.blob === file
+    && r2.keptOriginal === false && r2.note.length > 0
+    && r3.keptOriginal === false && r3.note === '';
+  report('压缩后变大处理逻辑', pass, JSON.stringify({ r1: r1.note, r2: r2.note, r3: r3.note }));
+}
+
+async function testZip() {
+  const zip = new ZipBuilder.Builder();
+  await zip.add('a.jpg', new Blob([new Uint8Array([1, 2, 3])]));
+  await zip.add('b.png', new Blob([new Uint8Array(5000)]));
+  const blob = zip.build();
+  const head = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+  const pass = head[0] === 0x50 && head[1] === 0x4b && blob.size > 5000;
+  report('ZIP 打包', pass, `zip 大小 ${blob.size} 字节，魔数 ${head[0].toString(16)}${head[1].toString(16)}`);
+}
+
+async function testIndexedDB() {
+  const frame = document.getElementById('appFrame');
+  const win = frame.contentWindow;
+  const hasDB = await new Promise((resolve) => {
+    const req = win.indexedDB.open('image-compressor', 1);
+    req.onsuccess = () => { req.result.close(); resolve(true); };
+    req.onerror = () => resolve(false);
+  });
+  report('IndexedDB 历史库可用', hasDB, '');
+}
+
+(async () => {
+  try {
+    await testJpegCompress();
+    await testAlphaPng();
+    await testAlphaWebp();
+    await testJpegFlatten();
+    await testExifOrientation();
+    await testBigFile();
+    await testNonImage();
+    await testBatch();
+    await testPickResult();
+    await testZip();
+    await testIndexedDB();
+  } catch (err) {
+    await report('测试执行异常', false, err.message);
+  }
+  const failed = lines.filter((l) => l.startsWith('FAIL')).length;
+  await report('ALL DONE', failed === 0, `${lines.length - failed}/${lines.length} 通过`);
+  document.title = failed === 0 ? 'ALL PASS' : 'HAS FAIL';
+})();
+</script>
+</body>
+</html>
