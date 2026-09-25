@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>图片压缩工具</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1>🖼️ 图片压缩工具</h1>
+    <p class="subtitle">本地处理 · 不上传 · 支持批量 / 拖拽 / 格式转换 / EXIF 自动纠正</p>
+  </header>
+
+  <main>
+    <section class="panel controls">
+      <label>
+        输出格式
+        <select id="format">
+          <option value="original">保持原格式</option>
+          <option value="jpeg">JPEG</option>
+          <option value="png">PNG</option>
+          <option value="webp">WebP</option>
+        </select>
+      </label>
+      <label class="quality-label">
+        压缩质量 <span id="qualityVal">80</span>%
+        <input type="range" id="quality" min="1" max="100" value="80">
+      </label>
+      <label>
+        尺寸缩放
+        <select id="resize">
+          <option value="original">原始尺寸</option>
+          <option value="3840">最长边 ≤ 3840</option>
+          <option value="2560">最长边 ≤ 2560</option>
+          <option value="1920">最长边 ≤ 1920</option>
+          <option value="1280">最长边 ≤ 1280</option>
+          <option value="800">最长边 ≤ 800</option>
+          <option value="custom">自定义…</option>
+        </select>
+      </label>
+      <span id="customSize" style="display:none">
+        <input type="number" id="customW" placeholder="宽 px" min="1">
+        ×
+        <input type="number" id="customH" placeholder="高 px" min="1">
+      </span>
+    </section>
+
+    <section id="dropZone" class="drop-zone">
+      <p class="drop-main">点击选择 或 拖拽图片到此处</p>
+      <p class="drop-sub">支持 JPEG / PNG / WebP / GIF / BMP / AVIF，单张最大 50MB+，可批量 10 张以上</p>
+      <input type="file" id="fileInput" accept="image/*" multiple hidden>
+    </section>
+
+    <section class="panel">
+      <div class="list-header">
+        <span id="stat" class="stat"></span>
+        <span>
+          <button id="downloadAll" class="btn primary">打包下载 (ZIP)</button>
+          <button id="clearList" class="btn">清空列表</button>
+        </span>
+      </div>
+      <p id="emptyTip" class="empty-tip">尚未添加图片</p>
+      <div id="list" class="list"></div>
+    </section>
+
+    <section class="panel">
+      <div class="list-header">
+        <h2>处理历史</h2>
+        <button id="clearHistory" class="btn">清空历史</button>
+      </div>
+      <ul id="historyList" class="history"></ul>
+    </section>
+  </main>
+
+  <script src="js/exif.js"></script>
+  <script src="js/zip.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
